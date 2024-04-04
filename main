@@ -1,0 +1,1114 @@
+"""This code provides a solid foundation for building a generative AI assistant with image input capabilities. 
+
+With further development and refinement, 
+
+Saathi can become a powerful and versatile tool for various tasks and interactions."""
+
+import os
+
+import threading
+
+from kivymd.icon_definitions import md_icons 
+
+import markdown
+
+from pygments import highlight
+
+from pygments.lexers import get_lexer_by_name
+
+from pygments.formatters import HtmlFormatter
+
+import textwrap
+
+from kivy.metrics import dp, sp
+
+import pyttsx3
+
+from kivy.animation import Animation
+
+from kivymd.color_definitions import palette
+
+from kivymd.theming import ThemeManager
+
+from kivymd.uix.menu import MDDropdownMenu
+
+import speech_recognition as sr
+
+import re
+
+from pathlib import Path
+
+from kivymd.uix.dialog import MDDialog
+
+from kivy.properties import StringProperty, NumericProperty
+
+from pygments import highlight
+
+from pygments.lexers import get_lexer_by_name
+
+from pygments.formatters import HtmlFormatter
+
+from kivy.utils import get_color_from_hex
+
+from kivymd.color_definitions import colors
+
+from concurrent.futures import ThreadPoolExecutor
+
+from kivy.lang import Builder
+
+from kivy.clock import Clock
+
+from kivymd.app import MDApp
+
+from kivy.uix.label import Label
+
+from kivy.uix.image import Image
+
+from kivymd.uix.label import MDLabel
+
+from kivymd.uix.textfield import MDTextField
+
+from kivymd.uix.button import MDIconButton
+
+from kivy.animation import Animation
+
+from kivymd.uix.boxlayout import MDBoxLayout
+
+from kivymd.uix.scrollview import MDScrollView
+
+from kivymd.uix.spinner import MDSpinner
+
+from kivymd.uix.filemanager import MDFileManager  # For file selection
+
+import google.generativeai as genai
+
+from dotenv import load_dotenv
+
+from kivy.clock import mainthread
+
+
+
+# Load environment variables
+
+load_dotenv()
+
+
+
+# Get the Google API key
+
+api_key = os.getenv("GOOGLE_API_KEY")
+
+
+
+# Raise an error if the API key is not found
+
+if not api_key:
+
+    raise ValueError("Google API key is missing. Please set the GOOGLE_API_KEY environment variable.")
+
+
+
+# Configure the generative AI with the API key
+
+genai.configure(api_key=api_key)
+
+
+
+KV_CODE = '''
+
+BoxLayout:
+
+    orientation: 'vertical'
+
+    padding: dp(16)
+
+    spacing: dp(16)
+
+    canvas.before:
+
+        Color:
+
+            rgba: app.theme_bg_color
+
+        RoundedRectangle:
+
+            pos: self.pos
+
+            size: self.size
+
+            radius: [20, 20, 20, 20]
+
+
+
+    MDLabel:
+
+        text: "[i]Saathi[/i]"
+
+        markup: True
+
+        font_style: "H3"
+
+        size_hint_y: None
+
+        height: self.texture_size[1] + dp(10)
+
+        theme_text_color: "Primary"
+
+        color: app.theme_cls.primary_color
+
+        elevation: 10  # Add a subtle shadow effect
+
+
+
+    MDSeparator:
+
+        height: "1dp"
+
+        color: app.theme_cls.primary_color
+
+
+
+    MDBoxLayout:
+
+        orientation: 'horizontal'
+
+        spacing: dp(16)
+
+        size_hint_y: None
+
+        height: dp(56)
+
+        elevation: 5  # Add a shadow to the input box
+
+
+
+        Image:
+
+            id: selected_image
+
+            size_hint_x: None
+
+            width: dp(50)
+
+            allow_stretch: True
+
+            source: ''
+
+            opacity: 0 if self.source == '' else 1
+
+            canvas.before:
+
+                RoundedRectangle:
+
+                    pos: self.pos
+
+                    size: self.size
+
+                    radius: [10, 10, 10, 10]
+
+
+
+        MDTextField:
+
+            id: input_text
+
+            hint_text: "Type or Speak Your Question"
+
+            font_size: "18sp"
+
+            mode: "fill"
+
+            color: app.theme_text_color
+
+            helper_text_mode: "on_focus"
+
+            helper_text: "Ask open-ended questions."
+
+            radius: [20,]
+
+            multiline: True
+
+            on_text: app.adjust_input_height(self, self.text)
+
+            elevation: 5  # Add a shadow to the input box
+
+
+
+    MDBoxLayout:
+
+        id: md_box_layout  # Define the ID for the MDBoxLayout
+
+        size_hint_y: None
+
+        height: dp(56)
+
+        spacing: dp(16)
+
+        elevation: 5  # Add a shadow to the toolbar
+
+
+
+        MDIconButton:
+
+            icon: "microphone"
+
+            theme_text_color: "Custom"
+
+            text_color: app.theme_text_color
+
+            on_release: app.record_audio()
+
+            tooltip_text: "Speak"
+
+
+
+        MDIconButton:
+
+            icon: "send"
+
+            theme_text_color: "Custom"
+
+            text_color: app.theme_text_color
+
+            on_release: app.on_ask()
+
+            tooltip_text: "Ask"
+
+
+
+        MDIconButton:
+
+            icon: "volume-high"
+
+            theme_text_color: "Custom"
+
+            text_color: app.theme_text_color
+
+            on_release: app.spell_out_response()
+
+            tooltip_text: "Listen"
+
+
+
+        MDIconButton:
+
+            icon: "image-plus"
+
+            theme_text_color: "Custom"
+
+            text_color: app.theme_text_color
+
+            on_release: app.select_image()
+
+            tooltip_text: "Add Image"
+
+
+
+        MDIconButton:
+
+            icon: "close"
+
+            theme_text_color: "Custom"
+
+            text_color: app.theme_text_color
+
+            on_release: app.clear_all()
+
+            tooltip_text: "Clear"
+
+
+
+    MDSeparator:
+
+        height: "1dp"
+
+        color: app.theme_cls.primary_color
+
+
+
+    ScrollView:
+
+        bar_width: "10dp"  # Set the width of the scrollbar
+
+        scroll_type: ['bars', 'content']  # Enable both scrollbars and content dragging
+
+        effect_cls: "ScrollEffect"  # Set the scrolling effect class
+
+        effect_x_cls: "ScrollEffect"  # Set the horizontal scrolling effect class
+
+        effect_y_cls: "ScrollEffect"  # Set the vertical scrolling effect class
+
+        scroll_y: 1 
+
+
+
+        MDBoxLayout:
+
+            orientation: 'vertical'
+
+            spacing: dp(16)
+
+            padding: dp(16)
+
+            size_hint_y: None
+
+            height: self.minimum_height  # Ensure the layout expands to fit its content
+
+
+
+            BoldableMDLabel:
+
+                id: response_text
+
+                text: ""
+
+                font_size: "18sp"  # Experiment with different font sizes
+
+                font_name: "Arial"  # Experiment with different font styles
+
+                theme_text_color: "Primary"  # Choose a text color that contrasts well
+
+                radius: [20,]
+
+                canvas.before:
+
+                    Color:
+
+                        rgba: app.theme_response_bg_color  # Different background color for response area
+
+                    RoundedRectangle:
+
+                        pos: self.pos
+
+                        size: self.size
+
+                        radius: [20,]
+
+                elevation: 5  # Add a shadow to the response text
+
+'''
+
+
+
+class ContentGenerator:
+
+    def __init__(self):
+
+        self.image_paths = []
+
+
+
+    def upload_image(self, image_path):
+
+        self.image_paths.append(image_path)
+
+
+
+    def generate_content(self, prompt_text):
+
+        prompt_parts = [f"{prompt_text}\n"]
+
+        for image_path in self.image_paths:
+
+            try:
+
+                image_data = {
+
+                    "mime_type": "image/jpeg",
+
+                    "data": Path(image_path).read_bytes()
+
+                }
+
+                prompt_parts.append(image_data)
+
+            except FileNotFoundError:
+
+                return f"File not found: {image_path}. Please enter a valid path."
+
+
+
+        model = genai.GenerativeModel(model_name="gemini-pro-vision")
+
+        response = model.generate_content(prompt_parts)
+
+        return response.text
+
+    
+
+class CustomResponseArea(Label):
+
+    # Define properties specific to the custom response area
+
+    custom_text = StringProperty("")  # Custom text property
+
+
+
+    def __init__(self, **kwargs):
+
+        # Call the superclass's __init__ method directly
+
+        Label.__init__(self, **kwargs)
+
+
+
+    def update_text(self, new_text):
+
+        self.custom_text = new_text
+
+
+
+
+
+# Custom widget for image display
+
+class CustomImageDisplay(Image):
+
+    image_source = StringProperty("")  # Image source property
+
+    image_opacity = NumericProperty(0)  # Image opacity property
+
+
+
+    def __init__(self, **kwargs):
+
+        super(CustomImageDisplay, self).__init__(**kwargs)
+
+
+
+    def display_image(self, path):
+
+        self.image_source = path
+
+        self.image_opacity = 1  # Make the image visible
+
+
+
+    def remove_image(self):
+
+        self.image_source = ""  # Clear the image source
+
+        self.image_opacity = 0  # Hide the image
+
+
+
+# KV code for custom widgets
+
+custom_widgets_kv = '''
+
+<CustomResponseArea>:
+
+    text_size: self.width - dp(20), None  # Adjust text size to fit width with padding
+
+    size_hint_y: None
+
+    height: self.texture_size[1] + dp(20)  # Adjust height based on texture_size and padding
+
+    font_size: "18sp"
+
+    halign: "justify"
+
+    valign: "top"  # Align text to the top
+
+    color: app.theme_text_color
+
+    padding: dp(10), dp(10)  # Add padding around text
+
+    line_height: 1.5  # Increase line spacing
+
+    canvas.before:
+
+        Color:
+
+            rgba: app.theme_response_bg_color
+
+        RoundedRectangle:
+
+            pos: self.pos
+
+            size: self.size
+
+            radius: [20,]
+
+    elevation: 5
+
+
+
+<CustomImageDisplay>:
+
+    size_hint_y: None
+
+    height: dp(200)
+
+    allow_stretch: True
+
+    opacity: root.image_opacity
+
+
+
+<CustomButton@MDIconButton>:
+
+    theme_text_color: "Custom"
+
+    text_color: app.theme_text_color
+
+    size_hint: None, None
+
+    size: dp(48), dp(48)
+
+    on_press: self.icon_color = app.theme_cls.accent_color  # Change icon color on press
+
+    on_release: self.icon_color = app.theme_text_color  # Reset icon color on release
+
+    md_bg_color: app.theme_cls.primary_color  # Set background color
+
+
+
+'''
+
+
+
+# Load custom widgets KV code
+
+Builder.load_string(custom_widgets_kv)
+
+    
+
+class BoldableMDLabel(MDLabel):
+
+    text = StringProperty("")
+
+
+
+    def on_text(self, instance, value):
+
+        self.line_height = 1.2  # Increase line spacing
+
+        self.halign = "justify"  # Justify text alignment
+
+        self.font_size = "18sp"  # Increase font size
+
+        self.color = (0.2, 0.2, 0.2, 1)  # Set darker text color
+
+        # Regular expression to find text wrapped in double asterisks
+
+        bold_pattern = r"\*\*(.+?)\*\*"
+
+        formatted_text = re.sub(bold_pattern, r"[b]1[/b]", value)  # Replace with bold tags
+
+        self.text = formatted_text
+
+        
+
+# Initialize the text-to-speech engine
+
+engine = pyttsx3.init()
+
+
+
+class ContextMemory:
+
+    def __init__(self, max_entries=5):
+
+        self.max_entries = max_entries
+
+        self.memory = []
+
+
+
+    def add_entry(self, user_input, ai_response):
+
+        if len(self.memory) >= self.max_entries:
+
+            self.memory.pop(0)  # Remove the oldest entry if memory is full
+
+        self.memory.append((user_input, ai_response))
+
+
+
+    def get_context(self):
+
+        return self.memory
+
+    
+
+class CustomResponseArea(Label):
+
+    # Define properties specific to the custom response area
+
+    custom_text = StringProperty("")  # Custom text property
+
+
+
+    def __init__(self, **kwargs):
+
+        super(CustomResponseArea, self).__init__(**kwargs)
+
+
+
+    def update_text(self, new_text):
+
+        self.custom_text = new_text
+
+    
+
+class Saathi(MDApp):
+
+    file_manager = None  # Define the file manager attribute
+
+    
+
+    def __init__(self, **kwargs):
+
+        super().__init__(**kwargs)
+
+        self.content_generator = ContentGenerator()
+
+        self.response_generator = genai.GenerativeModel('gemini-1.0-pro-latest')
+
+        self.dialog = None
+
+        self.theme_manager = ThemeManager()
+
+        self.context_memory = ContextMemory()
+
+        self.theme_response_bg_color = get_color_from_hex("#FFFFFF")  # Set background color of response area
+
+        self.theme_cls.primary_palette = "DeepPurple"  # Setting primary color palette
+
+        self.theme_cls.primary_hue = "500"  # Setting primary color hue
+
+        self.theme_cls.accent_palette = "Amber"  # Setting accent color palette
+
+        self.theme_cls.accent_hue = "500"  # Setting accent color hue
+
+        self.theme_bg_color = get_color_from_hex("#EDE7F6")  # Setting background color
+
+        self.theme_text_color = get_color_from_hex("#311B92")  # Setting text color
+
+        self.executor = ThreadPoolExecutor(max_workers=2)  # Define the executor here
+
+
+
+    def build(self):
+
+        self.theme_manager.primary_palette = "BlueGray"
+
+        self.root = Builder.load_string(KV_CODE)
+
+        self.theme_manager.theme_style = "Light"  # You can switch between "Light" and "Dark" theme here
+
+        self.file_manager = MDFileManager(exit_manager=self.exit_manager, select_path=self.select_path)
+
+        # Add animation to toolbar buttons after 1 second
+
+        Clock.schedule_once(lambda dt: self.animate_buttons(), 1)
+
+        return self.root
+
+    
+
+    def highlight_code(self, text):
+
+        # Define a regular expression pattern to detect code blocks
+
+        code_pattern = r'```(\w+)\n([\s\S]*?)\n```'
+
+
+
+        # Find all code blocks in the text
+
+        code_blocks = re.findall(code_pattern, text)
+
+
+
+        # Highlight each code block
+
+        for lang, code in code_blocks:
+
+            # Get the lexer for the specified language
+
+            lexer = get_lexer_by_name(lang, stripall=True)
+
+            # Highlight the code using the lexer
+
+            highlighted_code = highlight(code, lexer, HtmlFormatter())
+
+
+
+            # Replace the original code block with the highlighted code
+
+            text = text.replace(f'```{lang}\n{code}\n```', highlighted_code)
+
+
+
+        return text
+
+    
+
+    def change_palette(self, palette_name):
+
+        # Change the palette dynamically
+
+        self.theme_manager.primary_palette = palette_name
+
+
+
+    def change_style(self, style):
+
+        # Change the theme style (Light/Dark) dynamically
+
+        self.theme_manager.theme_style = style
+
+
+
+    def show_theme_menu(self, button):
+
+        # Create a dropdown menu for selecting themes
+
+        menu_items = [
+
+            {
+
+                "text": "Light Theme",
+
+                "viewclass": "OneLineListItem",
+
+                "on_release": lambda x="Light": self.change_style(x),
+
+            },
+
+            {
+
+                "text": "Dark Theme",
+
+                "viewclass": "OneLineListItem",
+
+                "on_release": lambda x="Dark": self.change_style(x),
+
+            }
+
+        ]
+
+        menu = MDDropdownMenu(
+
+            caller=button,
+
+            items=menu_items,
+
+            width_mult=4,
+
+        )
+
+        menu.open()
+
+    
+
+    def adjust_input_height(self, instance, text):
+
+        # Calculate the required height based on text content
+
+        min_height = dp(56)  # Minimum height of the field
+
+        new_height = max(min_height, instance.minimum_height)  # Ensure the height is at least the minimum
+
+
+
+        # Set the new height of the input text field
+
+        instance.height = new_height
+
+
+
+    def on_ask(self):
+
+        question = self.root.ids.input_text.text.strip()
+
+        image_path = self.root.ids.selected_image.source
+
+        if question:
+
+            self.show_spinner()
+
+            if image_path:
+
+                self.executor.submit(self.generate_content_with_image, question, image_path)
+
+            else:
+
+                self.executor.submit(self.generate_response, question)
+
+            # Add the user input to the context memory
+
+            self.context_memory.add_entry(question, "")  # Initialize AI response as empty string
+
+        else:
+
+            self.show_error_dialog("Please enter a question.")
+
+
+
+    def generate_response(self, question):
+
+        try:
+
+            response = self.response_generator.generate_content(question)
+
+            formatted_response = self.format_response(response.text)
+
+            self.display_response(formatted_response)
+
+            # Add the AI response to the context memory
+
+            self.context_memory.add_entry(question, formatted_response)
+
+        except genai.GenerationError as e:
+
+            self.handle_error(f"There was an issue generating a response. Error: {str(e)}")
+
+        except Exception as e:
+
+            self.handle_error(f"An unexpected error occurred: {str(e)}")
+
+        finally:
+
+            self.hide_spinner()
+
+
+
+    def generate_content_with_image(self, prompt_text, image_path):
+
+        try:
+
+            self.content_generator.upload_image(image_path)
+
+            response = self.content_generator.generate_content(prompt_text)
+
+            self.display_response(response)
+
+        except Exception as e:
+
+            self.handle_error(f"An unexpected error occurred: {str(e)}")
+
+        finally:
+
+            self.hide_spinner()
+
+            
+
+    def animate_response_text(self, response):
+
+        # Create an animation to gradually increase the opacity of the response text
+
+        anim = Animation(opacity=1, duration=0.5)
+
+        anim.start(self.root.ids.response_text)
+
+
+
+    def animate_buttons(self):
+
+        # Create animations for the toolbar buttons
+
+        for button in self.root.ids.md_box_layout.children:
+
+            button.opacity = 0  # Set initial opacity to 0
+
+            anim = Animation(opacity=1, duration=0.5)
+
+            anim.start(button)
+
+
+
+    def format_response(self, response):
+
+        return textwrap.fill(response, width=80)
+
+
+
+    def display_response(self, response):
+
+        word_count = len(response.split())
+
+        response = markdown.markdown(response)
+
+        response = self.highlight_code(response)
+
+        response = response.replace('<', '').replace('>', '').replace('p', '').replace('/', '')
+
+        has_image = bool(self.root.ids.selected_image.source)
+
+        # Animate the appearance of the response text
+
+        self.animate_response_text(response)
+
+        if word_count > 25 or has_image:
+
+            self.root.ids.md_box_layout.height = dp(100)  # Adjust layout height
+
+            self.root.ids.response_text.height = sp(400)  # Set fixed height for scrolling
+
+            self.root.ids.response_text.text_size = (None, None)  # Disable text wrapping
+
+            self.root.ids.response_text.scroll_y = 1  # Scroll to the bottom
+
+        else:
+
+            self.root.ids.md_box_layout.height = dp(56)  # Reset layout height
+
+            self.root.ids.response_text.height = dp(56)  # Reset height of response text
+
+            self.root.ids.response_text.text_size = (self.root.ids.response_text.width, None)  # Enable text wrapping
+
+
+
+        # Set the text and print properties for debugging
+
+        self.root.ids.response_text.text = response
+
+        print("Response text height:", self.root.ids.response_text.height)
+
+        print("Response text texture size:", self.root.ids.response_text.texture_size)
+
+        print("ScrollView scroll_y:", self.root.ids.scroll_view.scroll_y)  # Assuming your ScrollView has id "scroll_view"
+
+
+
+        # Clear input text field
+
+        self.root.ids.input_text.text = ""
+
+
+
+        if not has_image:
+
+            self.remove_image()
+
+        
+
+    def remove_image(self):
+
+        self.root.ids.selected_image.source = ''  # Clear the image source
+
+        self.root.ids.selected_image.opacity = 0  # Hide the image
+
+
+
+    def select_image(self):
+
+        self.file_manager.show('/')  # Show the file manager
+
+    
+
+    def exit_manager(self, *args):
+
+        self.file_manager.close()
+
+
+
+    def select_path(self, path):
+
+        if self.file_manager:
+
+            self.file_manager.close()
+
+        self.root.ids.selected_image.source = path
+
+
+
+    def clear_all(self):
+
+        self.root.ids.input_text.text = ""  # Clear the input text field
+
+        self.root.ids.response_text.text = ""  # Clear the responded text field
+
+        self.remove_image()  # Clear the selected image
+
+
+
+ def display_image(self, path):
+        self.remove_image()  # Remove any existing image before displaying a new one
+        # Display the image using an AsyncImage to load it asynchronously
+        self.root.ids.selected_image.source = path
+        self.root.ids.selected_image.opacity = 1  # Make the image visible
+
+    def handle_error(self, message):
+        print(message)
+        if isinstance(message, FileNotFoundError):
+            self.show_error_dialog(f"File not found: {message.filename}. Please enter a valid path.")
+        elif isinstance(message, genai.GenerationError):
+            self.show_error_dialog(f"There was an issue generating a response. Error: {str(message)}")
+        else:
+            # Handle other exceptions with a more generic message.
+            self.show_error_dialog(f"An unexpected error occurred: {str(message)}")
+
+    def show_error_dialog(self, message):
+        if self.dialog:
+            self.dialog.dismiss()
+        self.dialog = MDDialog(
+            title="Error",
+            text=message,
+            buttons=[
+                MDIconButton(
+                    icon="close-circle",
+                    theme_text_color="Custom",
+                    text_color=self.theme_text_color,
+                    on_release=lambda *args: self.dialog.dismiss()
+                )
+            ]
+        )
+        self.dialog.open()
+
+    def show_spinner(self):
+        spinner = MDSpinner(size_hint=(None, None), size=(28, 28), pos_hint={'center_x': .5, 'center_y': .5})
+        spinner.active = True
+        self.root.add_widget(spinner)
+
+    def hide_spinner(self):
+        Clock.schedule_once(self.remove_spinner, 0)
+ 
+    def  remove_spinner(self, dt):
+        for child in self.root.children:
+            if isinstance(child, MDSpinner):
+                self.root.remove_widget(child)
+                break
+
+    def spell_out_response(self):
+        response_text = self.root.ids.response_text.text
+        if response_text:
+            # Set a slower speaking rate for a soothing voice
+            engine.setProperty('rate', 160)  # Adjust the value for desired speed
+
+            # Choose a specific voice on your system (if available)
+            voices = engine.getProperty('voices')
+            # Example: Select the second voice (index 1)
+            engine.setProperty('voice', voices[1].id) 
+
+            # Set a lower volume for a softer voice
+            engine.setProperty('volume', 0.6)  # Adjust the value for desired volume
+
+            engine.say(response_text)
+            engine.runAndWait()
+        else:
+            self.show_error_dialog("No response to spell out.")
+
+
+    def record_audio(self):
+        try:
+            recognizer = sr.Recognizer()
+            with sr.Microphone() as source:
+                print("Speak your question...")
+                audio = recognizer.listen(source)
+            question = recognizer.recognize_google(audio)
+            print("You said:", question)
+            self.root.ids.input_text.text = question
+            self.on_ask()
+        except sr.UnknownValueError:
+            self.handle_error("Could not understand audio. Please try again.")
+        except sr.RequestError as e:
+            self.handle_error(f"An error occurred.")
+            self.handle_error(f"An error occurred. Please check your internet connection.")
+
+# Run the app
+if __name__ == "__main__":
+    Saathi().run()source = path
